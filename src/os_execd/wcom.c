@@ -55,8 +55,24 @@ size_t wcom_dispatch(char *command, size_t length, char *output){
         // open [rw file_path]
         mode = rcv_args;
         if (path = strchr(mode, ' '), path){
+            char * c_ext = NULL;
+            char * ext;
             *path = '\0';
             path++;
+            ext = path;
+
+            while (ext = strchr(ext, '.'), ext) {
+                c_ext = ext;
+                ext++;
+            }
+
+            if (c_ext) {
+                if (!strcmp(c_ext, ".wpk")) {
+                    minfo("Receiving an update. Agent restart has been blocked.");
+                    pending_up = 1;
+                }
+            }
+
             return wcom_open(path, mode, output);
         }else {
             merror("Bad WCOM open message.");
@@ -473,35 +489,33 @@ size_t wcom_upgrade_result(char *output){
 }
 
 size_t wcom_restart(char *output) {
-    #ifndef WIN32
+    if (!pending_up) {
+#ifndef WIN32
+        char *exec_cmd[3] = { DEFAULTDIR "/bin/ossec-control", "restart", NULL};
+        if (isChroot()) {
+            strcpy(exec_cmd[0], "/bin/ossec-control");
+        }
 
-    char *exec_cmd[3] = { DEFAULTDIR "/bin/ossec-control", "restart", NULL};
-    if (isChroot()) {
-        strcpy(exec_cmd[0], "/bin/ossec-control");
+        switch (fork()) {
+            case -1:
+                merror("At WCOM upgrade_result: Cannot fork");
+            break;
+            case 0:
+                sleep(1);
+                if (execv(exec_cmd[0], exec_cmd) < 0) {
+                    merror(EXEC_CMDERROR, *exec_cmd, strerror(errno));
+                    return strlen(output);
+                }
+            break;
+            default:
+                strcpy(output, "ok");
+            break;
+        }
+#else
+        char exec_cm[] = {"\"" AR_BINDIR "/restart-ossec.cmd\" add \"-\" \"null\" \"(from_the_server) (no_rule_id)\""};
+        ExecCmd_Win32(exec_cm);
+#endif
     }
-
-    switch (fork()) {
-        case -1:
-            merror("At WCOM upgrade_result: Cannot fork");
-        break;
-        case 0:
-            sleep(1);
-            if (execv(exec_cmd[0], exec_cmd) < 0) {
-                merror(EXEC_CMDERROR, *exec_cmd, strerror(errno));
-                return strlen(output);
-            }
-        break;
-        default:
-            strcpy(output, "ok");
-        break;
-    }
-
-    #else
-
-    char exec_cm[] = {"\"" AR_BINDIR "/restart-ossec.cmd\" add \"-\" \"null\" \"(from_the_server) (no_rule_id)\""};
-    ExecCmd_Win32(exec_cm);
-
-    #endif
 
     return strlen(output);
 }
